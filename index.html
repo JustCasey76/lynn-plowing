@@ -168,6 +168,7 @@
   <span class="pill" id="hdrCity">Lynn, MA · loading roads…</span>
   <div class="spacer"></div>
   <span class="pill" id="hdrTested">Scenarios tested: 0</span>
+  <span class="pill" id="hdrBestTime" style="background:#1d3320;border-color:#2d5a35;color:#9be9a8;">Est. time: —</span>
   <span class="pill" id="hdrBest">Best score: —</span>
 </header>
 
@@ -253,6 +254,7 @@
     <label style="color:var(--muted);">Speed</label>
     <input type="range" id="pbSpeed" min="1" max="500" value="80" style="width:140px;" />
     <span class="clock" id="pbClock">00:00 / 00:00</span>
+    <span class="badge" id="pbEta" style="background:#1d3320;border-color:#2d5a35;color:#9be9a8;">Est. complete: —</span>
     <span class="badge" id="pbName">—</span>
   </div>
   <div class="legend">
@@ -861,6 +863,8 @@ function loadScenarioForPlayback(scn) {
   setPlowMarkers(positions);
   document.getElementById('playbar').style.display = 'flex';
   document.getElementById('pbName').textContent = scn.name;
+  document.getElementById('pbEta').textContent =
+    `Est. complete: ${fmtTime(scn.metrics.totalCompletionTimeMinutes)} · Hi-Pri ${fmtTime(scn.metrics.highPriorityCompletionTimeMinutes)}`;
   updateClock();
 }
 function updateClock() {
@@ -1051,6 +1055,7 @@ function updateBestCard() {
   document.getElementById('hdrTested').textContent = `Scenarios tested: ${totalTested}`;
   if (!best) {
     document.getElementById('hdrBest').textContent = 'Best score: —';
+    document.getElementById('hdrBestTime').textContent = 'Est. time: —';
     document.getElementById('bScore').textContent = '—';
     document.getElementById('bComplete').textContent = '—';
     document.getElementById('bHi').textContent = '—';
@@ -1058,6 +1063,8 @@ function updateBestCard() {
     return;
   }
   document.getElementById('hdrBest').textContent = `Best score: ${best.metrics.score.toFixed(1)}`;
+  document.getElementById('hdrBestTime').textContent =
+    `Est. time: ${fmtTime(best.metrics.totalCompletionTimeMinutes)} · Hi-Pri ${fmtTime(best.metrics.highPriorityCompletionTimeMinutes)}`;
   document.getElementById('bScore').textContent = best.metrics.score.toFixed(1);
   document.getElementById('bComplete').textContent = fmtTime(best.metrics.totalCompletionTimeMinutes);
   document.getElementById('bHi').textContent = fmtTime(best.metrics.highPriorityCompletionTimeMinutes);
