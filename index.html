@@ -138,6 +138,75 @@
     opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 1100;
   }
   .toast.show { opacity: 1; }
+
+  /* Mobile drawer toggles in header (hidden on desktop) */
+  .drawer-toggle { display: none; }
+
+  /* Mobile / tablet layout */
+  @media (max-width: 900px) {
+    body {
+      grid-template-columns: 1fr;
+      grid-template-rows: 48px 1fr;
+      grid-template-areas: "header" "stage";
+    }
+    header { gap: 6px; padding: 0 8px; flex-wrap: nowrap; overflow-x: auto; }
+    header h1 { font-size: 13px; flex-shrink: 0; }
+    header .pill { font-size: 10px; padding: 3px 7px; flex-shrink: 0; }
+    header .spacer { display: none; }
+
+    .drawer-toggle {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 6px 10px; font-size: 12px; cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* Side panels become slide-in drawers (overlay the map) */
+    .left, .right {
+      position: fixed;
+      top: 48px;
+      bottom: 0;
+      width: min(86vw, 360px);
+      z-index: 900;
+      transition: transform .25s ease;
+      box-shadow: 0 0 24px rgba(0,0,0,.5);
+    }
+    .left { left: 0; transform: translateX(-100%); border-right: 1px solid var(--line); }
+    .right { right: 0; transform: translateX(100%); border-left: 1px solid var(--line); }
+    .left.open { transform: translateX(0); }
+    .right.open { transform: translateX(0); }
+
+    .scrim {
+      display: none;
+      position: fixed; inset: 48px 0 0 0;
+      background: rgba(0,0,0,.45); z-index: 800;
+    }
+    .scrim.show { display: block; }
+
+    /* Compact playbar / legend / compare on mobile */
+    .playbar {
+      top: 8px; padding: 6px 8px; gap: 4px; font-size: 11px;
+      max-width: calc(100vw - 16px); flex-wrap: wrap; justify-content: center;
+    }
+    .playbar input[type="range"] { width: 90px !important; }
+    .playbar .clock { min-width: 70px; }
+    .playbar .badge { font-size: 9px; }
+
+    .legend { font-size: 10px; padding: 6px 8px; bottom: 8px; left: 8px; }
+    .compare-bar { right: 8px; bottom: 8px; min-width: 220px; max-width: calc(100vw - 16px); }
+
+    /* Larger touch targets in inputs */
+    .row input[type="number"], .row select { width: 100px; padding: 6px 8px; font-size: 13px; }
+    button { padding: 8px 12px; font-size: 13px; }
+    .scenario .actions button { padding: 6px 10px; font-size: 12px; }
+  }
+
+  @media (max-width: 480px) {
+    header h1 { display: none; }
+    header #hdrCity { display: none; }
+    .legend { display: none; }
+  }
   .loader {
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
@@ -164,13 +233,16 @@
 </head>
 <body>
 <header>
+  <button class="drawer-toggle" id="btnLeftDrawer" aria-label="Open controls">☰</button>
   <h1>Lynn Plowing — Scenario Optimizer</h1>
   <span class="pill" id="hdrCity">Lynn, MA · loading roads…</span>
   <div class="spacer"></div>
   <span class="pill" id="hdrTested">Scenarios tested: 0</span>
   <span class="pill" id="hdrBestTime" style="background:#1d3320;border-color:#2d5a35;color:#9be9a8;">Est. time: —</span>
   <span class="pill" id="hdrBest">Best score: —</span>
+  <button class="drawer-toggle" id="btnRightDrawer" aria-label="Open scenarios">📋</button>
 </header>
+<div class="scrim" id="scrim"></div>
 
 <aside class="left">
   <div class="section">
@@ -1164,6 +1236,39 @@ document.getElementById('btnClear').addEventListener('click', () => {
   clearPlowback();
   renderScenarioList(); updateBestCard();
 });
+
+/* ------------ mobile drawers ------------ */
+const leftPanel = document.querySelector('.left');
+const rightPanel = document.querySelector('.right');
+const scrim = document.getElementById('scrim');
+function closeDrawers() {
+  leftPanel.classList.remove('open');
+  rightPanel.classList.remove('open');
+  scrim.classList.remove('show');
+}
+function openLeft() {
+  rightPanel.classList.remove('open');
+  leftPanel.classList.add('open');
+  scrim.classList.add('show');
+}
+function openRight() {
+  leftPanel.classList.remove('open');
+  rightPanel.classList.add('open');
+  scrim.classList.add('show');
+}
+document.getElementById('btnLeftDrawer').addEventListener('click', openLeft);
+document.getElementById('btnRightDrawer').addEventListener('click', openRight);
+scrim.addEventListener('click', closeDrawers);
+// auto-close drawer when launching an action so user sees the map
+['btnOptimize','btnSingle','btnStop'].forEach(id => {
+  document.getElementById(id).addEventListener('click', () => {
+    if (window.matchMedia('(max-width: 900px)').matches) closeDrawers();
+  });
+});
+
+// Recompute Leaflet size on resize / orientation change
+window.addEventListener('resize', () => { if (window.map) {} setTimeout(() => map.invalidateSize(), 100); });
+window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 200));
 
 /* ------------ boot ------------ */
 (async function init() {
