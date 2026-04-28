@@ -1,0 +1,1183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lynn Plowing — Scenario Optimizer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #151b24;
+    --panel-2: #1c2430;
+    --line: #2a3340;
+    --text: #e6edf3;
+    --muted: #8b98a8;
+    --accent: #4ea1ff;
+    --accent-2: #7ee787;
+    --warn: #f5a524;
+    --bad: #ff6b6b;
+    --plowed: #ffe066;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    grid-template-columns: 320px 1fr 360px;
+    grid-template-rows: 48px 1fr;
+    grid-template-areas:
+      "header header header"
+      "left   stage  right";
+    overflow: hidden;
+  }
+  header {
+    grid-area: header;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    z-index: 1000;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  header .pill {
+    background: var(--panel-2); border: 1px solid var(--line);
+    padding: 4px 10px; border-radius: 999px; font-size: 11px; color: var(--muted);
+  }
+  .left, .right { background: var(--panel); overflow-y: auto; }
+  .right { border-left: 1px solid var(--line); grid-area: right; }
+  .left { grid-area: left; border-right: 1px solid var(--line); }
+  .stage { grid-area: stage; position: relative; background: #0a0e14; }
+  #map { width: 100%; height: 100%; background: #0a0e14; }
+
+  /* Dark map tweaks */
+  .leaflet-container { background: #0a0e14; }
+  .leaflet-tile { filter: brightness(0.7) invert(1) contrast(0.8) hue-rotate(190deg) saturate(0.4) brightness(0.95); }
+  .leaflet-control-attribution { background: rgba(21,27,36,.85) !important; color: #8b98a8 !important; }
+  .leaflet-control-attribution a { color: #8b98a8 !important; }
+  .leaflet-control-zoom a { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
+
+  .section { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .section h2 {
+    margin: 0 0 8px; font-size: 11px; font-weight: 600;
+    letter-spacing: .8px; text-transform: uppercase; color: var(--muted);
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .row label { color: var(--muted); font-size: 12px; }
+  .row input[type="number"], .row select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 6px; font-size: 12px; width: 110px;
+  }
+  .row input[type="range"] { width: 110px; }
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 10px; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #232c3a; }
+  button.primary { background: var(--accent); color: #051322; border-color: transparent; font-weight: 600; }
+  button.primary:hover { background: #6db5ff; }
+  button.danger { background: #3a1c22; border-color: #5a2630; color: #ffb4b4; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat { background: var(--panel-2); padding: 6px 8px; border-radius: 4px; border: 1px solid var(--line); }
+  .stat .v { font-size: 14px; font-weight: 600; }
+  .stat .l { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .scenario-list { display: flex; flex-direction: column; }
+  .scenario { border-bottom: 1px solid var(--line); padding: 10px 14px; cursor: pointer; }
+  .scenario:hover { background: var(--panel-2); }
+  .scenario.active { background: #1d2937; border-left: 3px solid var(--accent); }
+  .scenario .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+  .scenario .rank { background: var(--accent); color: #051322; font-weight: 700; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+  .scenario.rank-1 .rank { background: #ffd166; color: #2a1a00; }
+  .scenario.rank-2 .rank { background: #c0c8d0; color: #1a1a1a; }
+  .scenario.rank-3 .rank { background: #cd853f; color: #fff; }
+  .scenario .name { font-size: 12px; font-weight: 600; }
+  .scenario .meta { font-size: 11px; color: var(--muted); }
+  .scenario .meta span { margin-right: 8px; }
+  .scenario .actions { display: flex; gap: 4px; margin-top: 6px; }
+  .scenario .actions button { padding: 3px 6px; font-size: 11px; }
+  .scenario .star { color: var(--warn); }
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: rgba(21,27,36,.92); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px; font-size: 11px;
+    z-index: 500;
+  }
+  .legend .row2 { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+  .swatch { width: 14px; height: 3px; border-radius: 2px; }
+  .playbar {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(21,27,36,.95); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 12px; display: flex; gap: 8px; align-items: center;
+    font-size: 12px; z-index: 500;
+  }
+  .playbar .clock { font-variant-numeric: tabular-nums; min-width: 90px; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 12px; padding: 14px; text-align: center; }
+  .compare-bar {
+    position: absolute; bottom: 16px; right: 16px;
+    background: rgba(21,27,36,.95); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px; min-width: 280px; font-size: 11px;
+    z-index: 500;
+  }
+  .compare-bar h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .cmp-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; padding: 3px 0; }
+  .cmp-row.head { color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 4px; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+  .toast {
+    position: absolute; top: 60px; right: 16px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    padding: 8px 12px; border-radius: 4px; font-size: 12px;
+    opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 1100;
+  }
+  .toast.show { opacity: 1; }
+  .loader {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px;
+    background: rgba(13,17,23,.92); z-index: 700;
+    font-size: 14px; color: var(--muted);
+  }
+  .loader .spin {
+    width: 32px; height: 32px;
+    border: 3px solid var(--line); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .plow-marker {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #4ea1ff; border: 2px solid #fff;
+    box-shadow: 0 0 6px rgba(78,161,255,0.8);
+  }
+  .depot-marker {
+    width: 14px; height: 14px;
+    background: #7ee787; border: 2px solid #0a0e14;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lynn Plowing — Scenario Optimizer</h1>
+  <span class="pill" id="hdrCity">Lynn, MA · loading roads…</span>
+  <div class="spacer"></div>
+  <span class="pill" id="hdrTested">Scenarios tested: 0</span>
+  <span class="pill" id="hdrBest">Best score: —</span>
+</header>
+
+<aside class="left">
+  <div class="section">
+    <h2>Fleet</h2>
+    <div class="row"><label>DPW plows</label><input type="number" id="inDpw" min="0" max="200" value="47" /></div>
+    <div class="row"><label>Contractor plows</label><input type="number" id="inContract" min="0" max="500" value="250" /></div>
+    <div class="row"><label>Active plows used</label><input type="number" id="inActive" min="1" max="500" value="80" /></div>
+    <div class="row"><label>Plow speed (mph)</label><input type="number" id="inSpeed" min="3" max="30" value="12" /></div>
+  </div>
+  <div class="section">
+    <h2>Strategy (single run)</h2>
+    <div class="row"><label>Clustering</label>
+      <select id="inCluster">
+        <option value="grid">Grid (28 zones)</option>
+        <option value="kmeans" selected>K-means</option>
+        <option value="priority">Priority-weighted</option>
+      </select>
+    </div>
+    <div class="row"><label>Assignment</label>
+      <select id="inAssign">
+        <option value="roundrobin">Round-robin</option>
+        <option value="capacity" selected>Capacity-balanced</option>
+        <option value="priorityfirst">Priority-first</option>
+      </select>
+    </div>
+    <div class="row"><label>Routing</label>
+      <select id="inRoute">
+        <option value="nn">Nearest-neighbor</option>
+        <option value="nn2opt" selected>NN + 2-opt</option>
+      </select>
+    </div>
+    <div class="row"><label>Priority strategy</label>
+      <select id="inPri">
+        <option value="balanced" selected>Balanced</option>
+        <option value="hi-first">High-priority first</option>
+        <option value="residential-first">Residential first</option>
+      </select>
+    </div>
+    <div class="row"><label>Storm severity</label>
+      <select id="inStorm">
+        <option value="light">Light</option>
+        <option value="moderate" selected>Moderate</option>
+        <option value="heavy">Heavy</option>
+      </select>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Optimizer</h2>
+    <div class="row"><label>Scenarios per run</label><input type="number" id="inBatch" min="1" max="500" value="30" /></div>
+    <div class="row"><label>Keep top</label><input type="number" id="inKeep" min="1" max="50" value="12" /></div>
+    <div class="btn-row">
+      <button class="primary" id="btnOptimize">Run Optimization</button>
+      <button class="danger" id="btnStop" disabled>Stop</button>
+      <button id="btnSingle">Run Single</button>
+    </div>
+    <div class="progress"><div id="progBar"></div></div>
+    <div style="margin-top:8px; font-size:11px; color: var(--muted);" id="optStatus">Idle.</div>
+  </div>
+  <div class="section">
+    <h2>Best so far</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="l">Score</div><div class="v" id="bScore">—</div></div>
+      <div class="stat"><div class="l">Completion</div><div class="v" id="bComplete">—</div></div>
+      <div class="stat"><div class="l">Hi-Pri done</div><div class="v" id="bHi">—</div></div>
+      <div class="stat"><div class="l">Deadhead mi</div><div class="v" id="bDH">—</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;">Results are <em>best simulated scenarios</em>, not a proven mathematical optimum.</div>
+  </div>
+</aside>
+
+<main class="stage">
+  <div id="map"></div>
+  <div class="loader" id="loader">
+    <div class="spin"></div>
+    <div id="loaderText">Fetching Lynn road network from OpenStreetMap…</div>
+  </div>
+  <div class="playbar" id="playbar" style="display:none;">
+    <button id="pbPlay">▶</button>
+    <button id="pbPause">⏸</button>
+    <button id="pbRestart">⟲</button>
+    <label style="color:var(--muted);">Speed</label>
+    <input type="range" id="pbSpeed" min="1" max="500" value="80" style="width:140px;" />
+    <span class="clock" id="pbClock">00:00 / 00:00</span>
+    <span class="badge" id="pbName">—</span>
+  </div>
+  <div class="legend">
+    <div style="font-weight:600;margin-bottom:4px;">Legend</div>
+    <div class="row2"><div class="swatch" style="background:#ff6b6b"></div>Priority 1 (arterial)</div>
+    <div class="row2"><div class="swatch" style="background:#f5a524"></div>Priority 2 (collector)</div>
+    <div class="row2"><div class="swatch" style="background:#6cb3ff"></div>Priority 3 (residential)</div>
+    <div class="row2"><div class="swatch" style="background:#ffe066"></div>Plowed</div>
+    <div class="row2"><div style="width:8px;height:8px;border-radius:50%;background:#4ea1ff"></div>Plow</div>
+    <div class="row2"><div style="width:8px;height:8px;background:#7ee787"></div>Depot</div>
+  </div>
+  <div class="compare-bar" id="compareBar" style="display:none;">
+    <h3>Compare top 3</h3>
+    <div id="compareBody"></div>
+  </div>
+  <div class="toast" id="toast"></div>
+</main>
+
+<aside class="right">
+  <div class="section" style="display:flex;align-items:center;justify-content:space-between;">
+    <h2 style="margin:0;">Scenarios</h2>
+    <div class="btn-row">
+      <button id="btnCompare">Compare Top 3</button>
+      <button id="btnClear">Clear</button>
+    </div>
+  </div>
+  <div class="scenario-list" id="scenarioList">
+    <div class="empty">Loading map first…</div>
+  </div>
+</aside>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+/* ============================================================
+   LYNN PLOWING — SCENARIO OPTIMIZER (real OSM)
+   Leaflet + Overpass API (live Lynn road network)
+   ============================================================ */
+
+const LYNN_CENTER = [42.4668, -70.9495];
+// Bounding box for Lynn, MA (south, west, north, east)
+const LYNN_BBOX = [42.435, -71.020, 42.500, -70.910];
+
+/* ------------ utils ------------ */
+const rand = (a=1, b=0) => Math.random() * (a - b) + b;
+const irand = (a, b=0) => Math.floor(rand(a, b));
+const pick = (a) => a[irand(a.length)];
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const fmtTime = (m) => {
+  if (!isFinite(m)) return '—';
+  const h = Math.floor(m / 60), mm = Math.floor(m % 60);
+  return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+};
+const fmtClock = (m) => {
+  const h = Math.floor(m/60), mm = Math.floor(m%60);
+  return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+};
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), 1800);
+}
+// haversine distance in miles
+function haversineMi(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const toRad = (x) => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/* ------------ Overpass fetch ------------ */
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+const QUERY = `
+[out:json][timeout:60];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street)$"]
+    (${LYNN_BBOX[0]},${LYNN_BBOX[1]},${LYNN_BBOX[2]},${LYNN_BBOX[3]});
+);
+out tags;
+>;
+out skel qt;
+`;
+const PRIORITY_MAP = {
+  motorway: 1, trunk: 1, primary: 1,
+  secondary: 2, tertiary: 2,
+  unclassified: 3, residential: 3, service: 3, living_street: 3
+};
+
+async function fetchRoads() {
+  const setText = (s) => document.getElementById('loaderText').textContent = s;
+  setText('Fetching Lynn road network from OpenStreetMap…');
+  const res = await fetch(OVERPASS, {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(QUERY),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  if (!res.ok) throw new Error('Overpass error ' + res.status);
+  setText('Parsing road geometry…');
+  const data = await res.json();
+  return parseOSM(data);
+}
+
+function parseOSM(data) {
+  if (!data || !Array.isArray(data.elements)) {
+    throw new Error('Invalid Overpass response (no elements array)');
+  }
+  const nodesRaw = new Map();
+  const ways = [];
+  for (const el of data.elements) {
+    if (el.type === 'node' && typeof el.lat === 'number' && typeof el.lon === 'number') {
+      nodesRaw.set(el.id, { lat: el.lat, lon: el.lon });
+    } else if (el.type === 'way' && Array.isArray(el.nodes) && el.tags && el.tags.highway) {
+      ways.push(el);
+    }
+  }
+  if (!nodesRaw.size) throw new Error('Overpass returned 0 nodes');
+  if (!ways.length) throw new Error('Overpass returned 0 highway ways');
+
+  // Build node list keyed by OSM id. We add EVERY raw node so any way reference resolves.
+  const nodeIdx = new Map();
+  const nodes = [];
+  for (const [oid, raw] of nodesRaw) {
+    const idx = nodes.length;
+    nodes.push({ id: idx, osmId: oid, lat: raw.lat, lon: raw.lon });
+    nodeIdx.set(oid, idx);
+  }
+
+  // Usage count per node — only across nodes we actually have
+  const useCount = new Map();
+  for (const w of ways) {
+    for (const nid of w.nodes) {
+      if (!nodeIdx.has(nid)) continue;
+      useCount.set(nid, (useCount.get(nid) || 0) + 1);
+    }
+  }
+
+  // Edges: split ways at intersections or endpoints. Skip any segment whose
+  // referenced nodes aren't fully present.
+  const edges = [];
+  let dropped = 0;
+  for (const w of ways) {
+    const pri = PRIORITY_MAP[w.tags.highway] || 3;
+    const oneway = w.tags.oneway === 'yes';
+    // filter way nodes down to ones we actually have
+    const wn = w.nodes.filter(id => nodeIdx.has(id));
+    if (wn.length < 2) { dropped++; continue; }
+    let segNodes = [wn[0]];
+    for (let i = 1; i < wn.length; i++) {
+      const nid = wn[i];
+      segNodes.push(nid);
+      const isIntersection = (useCount.get(nid) || 0) > 1 || i === wn.length - 1;
+      if (isIntersection && segNodes.length >= 2) {
+        const a = nodeIdx.get(segNodes[0]);
+        const b = nodeIdx.get(segNodes[segNodes.length - 1]);
+        if (a !== undefined && b !== undefined && a !== b) {
+          const geom = [];
+          for (const id of segNodes) {
+            const idx = nodeIdx.get(id);
+            if (idx !== undefined) geom.push(idx);
+          }
+          if (geom.length >= 2) {
+            let lenMi = 0;
+            let geomOk = true;
+            for (let k = 1; k < geom.length; k++) {
+              const n0 = nodes[geom[k-1]], n1 = nodes[geom[k]];
+              if (!n0 || !n1) { geomOk = false; break; }
+              lenMi += haversineMi(n0.lat, n0.lon, n1.lat, n1.lon);
+            }
+            if (geomOk && lenMi > 0) {
+              edges.push({ a, b, priority: pri, lenMi, geom, oneway, plowed: false });
+            } else {
+              dropped++;
+            }
+          }
+        }
+        segNodes = [nid];
+      }
+    }
+  }
+  if (!edges.length) throw new Error('No usable edges built from Overpass data');
+
+  const adj = nodes.map(() => []);
+  edges.forEach((e, idx) => { adj[e.a].push({ to: e.b, edge: idx }); adj[e.b].push({ to: e.a, edge: idx }); });
+  console.log(`[parseOSM] ${nodes.length} nodes, ${edges.length} edges, ${dropped} segments dropped`);
+  return { nodes, edges, adj };
+}
+
+/* ------------ depots: pick reasonable seed nodes ------------ */
+function pickDepots(graph) {
+  // pick 4 spatially-distributed nodes (corners-ish of city)
+  const pts = [
+    [42.470, -71.000], [42.470, -70.920],
+    [42.444, -71.000], [42.444, -70.920]
+  ];
+  const depots = [];
+  for (const [la, lo] of pts) {
+    let best = null, bd = Infinity;
+    for (const n of graph.nodes) {
+      const d = (n.lat - la) ** 2 + (n.lon - lo) ** 2;
+      if (d < bd) { bd = d; best = n.id; }
+    }
+    depots.push(best);
+  }
+  return depots;
+}
+
+/* ------------ zones for grid-clustering ------------ */
+function computeBounds(graph) {
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+  for (const n of graph.nodes) {
+    if (n.lat < minLat) minLat = n.lat;
+    if (n.lat > maxLat) maxLat = n.lat;
+    if (n.lon < minLon) minLon = n.lon;
+    if (n.lon > maxLon) maxLon = n.lon;
+  }
+  return { minLat, maxLat, minLon, maxLon };
+}
+
+/* ------------ clustering ------------ */
+function edgeCenter(graph, e) {
+  const a = graph.nodes[e.a], b = graph.nodes[e.b];
+  return { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
+}
+function clusterEdges(graph, bounds, strategy, k) {
+  const edges = graph.edges;
+  if (strategy === 'grid') {
+    const COLS = 7, ROWS = 4;
+    const groups = Array.from({ length: COLS * ROWS }, () => []);
+    const dLat = (bounds.maxLat - bounds.minLat) / ROWS;
+    const dLon = (bounds.maxLon - bounds.minLon) / COLS;
+    edges.forEach((e, i) => {
+      const c = edgeCenter(graph, e);
+      const zr = clamp(Math.floor((c.lat - bounds.minLat) / dLat), 0, ROWS - 1);
+      const zc = clamp(Math.floor((c.lon - bounds.minLon) / dLon), 0, COLS - 1);
+      groups[zr * COLS + zc].push(i);
+    });
+    return groups.filter(g => g.length);
+  }
+  if (strategy === 'priority') {
+    const p1 = [], rest = [];
+    edges.forEach((e, i) => (e.priority === 1 ? p1 : rest).push(i));
+    const restK = Math.max(1, k - 1);
+    const restGroups = Array.from({ length: restK }, () => []);
+    const dLon = (bounds.maxLon - bounds.minLon) / restK;
+    rest.forEach(i => {
+      const c = edgeCenter(graph, edges[i]);
+      const idx = clamp(Math.floor((c.lon - bounds.minLon) / dLon), 0, restK - 1);
+      restGroups[idx].push(i);
+    });
+    return [p1, ...restGroups].filter(g => g.length);
+  }
+  // kmeans
+  const K = clamp(k, 4, 60);
+  const centers = [];
+  for (let i = 0; i < K; i++) {
+    centers.push({
+      lat: rand(bounds.maxLat, bounds.minLat),
+      lon: rand(bounds.maxLon, bounds.minLon)
+    });
+  }
+  const assign = new Int32Array(edges.length);
+  for (let iter = 0; iter < 8; iter++) {
+    for (let i = 0; i < edges.length; i++) {
+      const c = edgeCenter(graph, edges[i]);
+      let bd = Infinity, bj = 0;
+      for (let j = 0; j < K; j++) {
+        const dy = c.lat - centers[j].lat, dx = c.lon - centers[j].lon;
+        const d = dy*dy + dx*dx;
+        if (d < bd) { bd = d; bj = j; }
+      }
+      assign[i] = bj;
+    }
+    const sum = Array.from({ length: K }, () => ({ lat: 0, lon: 0, n: 0 }));
+    for (let i = 0; i < edges.length; i++) {
+      const c = edgeCenter(graph, edges[i]); const a = assign[i];
+      sum[a].lat += c.lat; sum[a].lon += c.lon; sum[a].n++;
+    }
+    for (let j = 0; j < K; j++) {
+      if (sum[j].n) { centers[j].lat = sum[j].lat / sum[j].n; centers[j].lon = sum[j].lon / sum[j].n; }
+    }
+  }
+  const groups = Array.from({ length: K }, () => []);
+  for (let i = 0; i < edges.length; i++) groups[assign[i]].push(i);
+  return groups.filter(g => g.length);
+}
+
+/* ------------ routing ------------ */
+function nearestNeighborRoute(graph, edgeIdxs, startNodeId) {
+  const remaining = new Set(edgeIdxs);
+  const sequence = [];
+  let cur = startNodeId;
+  const nodes = graph.nodes;
+  while (remaining.size) {
+    let best = null, bd = Infinity, bEnd = null;
+    const ncur = nodes[cur];
+    for (const ei of remaining) {
+      const e = graph.edges[ei];
+      const na = nodes[e.a], nb = nodes[e.b];
+      const da = (ncur.lat - na.lat) ** 2 + (ncur.lon - na.lon) ** 2;
+      const db = (ncur.lat - nb.lat) ** 2 + (ncur.lon - nb.lon) ** 2;
+      if (da < bd) { bd = da; best = ei; bEnd = e.b; }
+      if (db < bd) { bd = db; best = ei; bEnd = e.a; }
+    }
+    remaining.delete(best);
+    sequence.push(best);
+    cur = bEnd;
+  }
+  return sequence;
+}
+function twoOpt(graph, sequence, startNodeId, iterations = 1) {
+  if (sequence.length < 4) return sequence;
+  const nodes = graph.nodes;
+  const cost = (seq) => {
+    let total = 0, cur = startNodeId;
+    for (const ei of seq) {
+      const e = graph.edges[ei];
+      const na = nodes[e.a], nb = nodes[e.b], nc = nodes[cur];
+      const da = haversineMi(nc.lat, nc.lon, na.lat, na.lon);
+      const db = haversineMi(nc.lat, nc.lon, nb.lat, nb.lon);
+      const useA = da < db;
+      total += (useA ? da : db) + e.lenMi;
+      cur = useA ? e.b : e.a;
+    }
+    return total;
+  };
+  let best = sequence.slice();
+  let bestCost = cost(best);
+  const N = best.length;
+  for (let it = 0; it < iterations; it++) {
+    let improved = false;
+    const tries = Math.min(80, N * 2);
+    for (let t = 0; t < tries; t++) {
+      if (N < 3) break;
+      const i = irand(N - 2);
+      const j = i + 1 + irand(N - i - 1);
+      const next = best.slice(0, i).concat(best.slice(i, j+1).reverse()).concat(best.slice(j+1));
+      const c = cost(next);
+      if (c < bestCost - 1e-6) { best = next; bestCost = c; improved = true; }
+    }
+    if (!improved) break;
+  }
+  return best;
+}
+
+/* ------------ scenario simulation ------------ */
+const STORM_FACTOR = { light: 0.9, moderate: 1.0, heavy: 1.25 };
+
+function runScenario(graph, depots, opts) {
+  const {
+    activePlows, plowSpeedMph, clusteringStrategy, assignmentStrategy,
+    routingStrategy, priorityStrategy, stormSeverity, plowsPerZone, bounds
+  } = opts;
+  const k = clamp(plowsPerZone ? Math.round(activePlows / plowsPerZone) : 28, 4, 60);
+  const clusters = clusterEdges(graph, bounds, clusteringStrategy, k);
+  for (const cl of clusters) {
+    cl.sort((a, b) => {
+      const ea = graph.edges[a], eb = graph.edges[b];
+      if (priorityStrategy === 'hi-first') return ea.priority - eb.priority;
+      if (priorityStrategy === 'residential-first') return eb.priority - ea.priority;
+      return ea.priority - eb.priority || (Math.random() - 0.5);
+    });
+  }
+  const plows = [];
+  for (let i = 0; i < activePlows; i++) {
+    plows.push({ id: i, depot: depots[i % depots.length], edges: [], totalEdgeLen: 0, isDpw: i < (opts.dpwOwnedEquipment || 0) });
+  }
+  const clusterOrder = clusters.map((c) => ({ c, w: c.reduce((s, ei) => s + graph.edges[ei].lenMi, 0) }))
+    .sort((a, b) => b.w - a.w);
+
+  if (assignmentStrategy === 'roundrobin') {
+    for (const { c } of clusterOrder) {
+      for (let i = 0; i < c.length; i++) plows[i % plows.length].edges.push(c[i]);
+    }
+  } else if (assignmentStrategy === 'priorityfirst') {
+    const p1 = [], p2 = [], p3 = [];
+    graph.edges.forEach((e, i) => {
+      if (e.priority === 1) p1.push(i);
+      else if (e.priority === 2) p2.push(i);
+      else p3.push(i);
+    });
+    const half = Math.max(1, Math.floor(plows.length / 2));
+    p1.forEach((ei, i) => plows[i % half].edges.push(ei));
+    p2.forEach((ei, i) => plows[i % plows.length].edges.push(ei));
+    p3.forEach((ei, i) => {
+      const otherCount = Math.max(1, plows.length - half);
+      plows[half + (i % otherCount)].edges.push(ei);
+    });
+  } else {
+    for (const { c } of clusterOrder) {
+      const chunk = Math.max(1, Math.ceil(c.length / Math.max(1, Math.ceil(c.length / 40))));
+      for (let i = 0; i < c.length; i += chunk) {
+        plows.sort((a, b) => a.totalEdgeLen - b.totalEdgeLen);
+        const sub = c.slice(i, i + chunk);
+        for (const ei of sub) {
+          plows[0].edges.push(ei);
+          plows[0].totalEdgeLen += graph.edges[ei].lenMi;
+        }
+      }
+    }
+    plows.sort((a, b) => a.id - b.id);
+  }
+
+  const stormMul = STORM_FACTOR[stormSeverity] || 1;
+  const speedMph = plowSpeedMph / stormMul;
+  let totalEdgeMi = 0, totalDeadheadMi = 0;
+  let plowFinishMin = [];
+  let timeline = [];
+  const edgePlowedBy = new Map();
+  let hiPriDoneMin = 0;
+
+  for (const p of plows) {
+    if (!p.edges.length) { plowFinishMin.push(0); continue; }
+    let seq = nearestNeighborRoute(graph, p.edges, p.depot);
+    if (routingStrategy === 'nn2opt') seq = twoOpt(graph, seq, p.depot, 2);
+    let cur = p.depot, t = 0;
+    for (const ei of seq) {
+      const e = graph.edges[ei];
+      const na = graph.nodes[e.a], nb = graph.nodes[e.b], nc = graph.nodes[cur];
+      const da = haversineMi(nc.lat, nc.lon, na.lat, na.lon);
+      const db = haversineMi(nc.lat, nc.lon, nb.lat, nb.lon);
+      const useA = da < db;
+      const dh = useA ? da : db;
+      totalDeadheadMi += dh;
+      const tDh = (dh / speedMph) * 60;
+      const tEdge = (e.lenMi / speedMph) * 60;
+      const startMin = t + tDh, endMin = startMin + tEdge;
+      timeline.push({ plowId: p.id, edge: ei, startMin, endMin, fromNode: cur, viaA: useA });
+      totalEdgeMi += e.lenMi;
+      if (!edgePlowedBy.has(ei)) {
+        edgePlowedBy.set(ei, { plowId: p.id, endMin });
+        if (e.priority === 1 && endMin > hiPriDoneMin) hiPriDoneMin = endMin;
+      }
+      cur = useA ? e.b : e.a;
+      t = endMin;
+    }
+    plowFinishMin.push(t);
+    p.routeSequence = seq;
+  }
+  const completion = Math.max(0, ...plowFinishMin);
+  const avgFinish = plowFinishMin.reduce((s, v) => s + v, 0) / Math.max(1, plowFinishMin.length);
+  const utilization = completion ? avgFinish / completion : 0;
+  const assigned = plows.reduce((s, p) => s + p.edges.length, 0);
+  const unique = edgePlowedBy.size;
+  const overlapPct = assigned ? Math.max(0, (assigned - unique) / assigned * 100) : 0;
+  const score =
+      completion * 0.40
+    + hiPriDoneMin * 0.30
+    + totalDeadheadMi * 0.15
+    + overlapPct * 0.10
+    - utilization * 100 * 0.05;
+  return {
+    metrics: {
+      totalCompletionTimeMinutes: completion,
+      highPriorityCompletionTimeMinutes: hiPriDoneMin,
+      totalMilesPlowed: totalEdgeMi,
+      deadheadMiles: totalDeadheadMi,
+      averagePlowUtilization: utilization,
+      routeOverlapPercent: overlapPct,
+      score
+    },
+    plows, timeline: timeline.sort((a, b) => a.startMin - b.startMin), edgePlowedBy
+  };
+}
+
+function makeRandomScenarioInputs(base) {
+  const clusterStrats = ['grid', 'kmeans', 'priority'];
+  const assignStrats = ['roundrobin', 'capacity', 'priorityfirst'];
+  const routeStrats = ['nn', 'nn2opt'];
+  const priStrats = ['balanced', 'hi-first', 'residential-first'];
+  const fleetMin = Math.max(20, Math.floor(base.activePlows * 0.5));
+  const fleetMax = Math.min(base.dpwOwnedEquipment + base.contractedEquipment, Math.ceil(base.activePlows * 1.5));
+  return {
+    ...base,
+    activePlows: irand(Math.max(fleetMin + 1, fleetMax + 1), fleetMin),
+    plowSpeedMph: clamp(base.plowSpeedMph + irand(7, -3), 5, 22),
+    clusteringStrategy: pick(clusterStrats),
+    assignmentStrategy: pick(assignStrats),
+    routingStrategy: pick(routeStrats),
+    priorityStrategy: pick(priStrats),
+    plowsPerZone: pick([null, 2, 3, 4, 5, 6])
+  };
+}
+
+/* ============================================================
+   Leaflet rendering
+   ============================================================ */
+const map = L.map('map', { preferCanvas: true, zoomControl: true }).setView(LYNN_CENTER, 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+let GRAPH = null, BOUNDS = null, DEPOTS = [];
+let baseLayer = L.layerGroup().addTo(map);  // base road colors
+let plowedLayer = L.layerGroup().addTo(map); // plowed overlay
+let plowMarkerLayer = L.layerGroup().addTo(map);
+let depotLayer = L.layerGroup().addTo(map);
+let edgePolylines = []; // edgeIdx -> L.polyline (base)
+let plowedPolylines = new Map(); // edgeIdx -> L.polyline
+let plowMarkers = new Map(); // plowId -> L.marker
+let activeScenario = null;
+let plowedSet = new Set();
+
+function colorForPriority(p) {
+  return p === 1 ? '#ff6b6b' : p === 2 ? '#f5a524' : '#6cb3ff';
+}
+function weightForPriority(p) {
+  return p === 1 ? 3.5 : p === 2 ? 2.6 : 1.6;
+}
+
+function drawBaseGraph() {
+  baseLayer.clearLayers();
+  edgePolylines = [];
+  for (let i = 0; i < GRAPH.edges.length; i++) {
+    const e = GRAPH.edges[i];
+    const latlngs = e.geom.map(idx => [GRAPH.nodes[idx].lat, GRAPH.nodes[idx].lon]);
+    const pl = L.polyline(latlngs, {
+      color: colorForPriority(e.priority),
+      weight: weightForPriority(e.priority),
+      opacity: 0.85
+    });
+    edgePolylines.push(pl);
+    pl.addTo(baseLayer);
+  }
+  // depots
+  depotLayer.clearLayers();
+  for (const did of DEPOTS) {
+    const n = GRAPH.nodes[did];
+    L.marker([n.lat, n.lon], {
+      icon: L.divIcon({ className: '', html: '<div class="depot-marker"></div>', iconSize: [14,14], iconAnchor: [7,7] })
+    }).addTo(depotLayer);
+  }
+}
+
+function setPlowedVisual(edgeIdxSet) {
+  // Add plowed overlay polylines for newly plowed edges; remove for unplowed
+  // Diff approach
+  for (const ei of edgeIdxSet) {
+    if (!plowedPolylines.has(ei)) {
+      const e = GRAPH.edges[ei];
+      const latlngs = e.geom.map(idx => [GRAPH.nodes[idx].lat, GRAPH.nodes[idx].lon]);
+      const pl = L.polyline(latlngs, { color: '#ffe066', weight: 4, opacity: 0.95 });
+      pl.addTo(plowedLayer);
+      plowedPolylines.set(ei, pl);
+    }
+  }
+  for (const [ei, pl] of plowedPolylines) {
+    if (!edgeIdxSet.has(ei)) {
+      plowedLayer.removeLayer(pl);
+      plowedPolylines.delete(ei);
+    }
+  }
+}
+
+function setPlowMarkers(positions) {
+  // positions: array of {plowId, lat, lon}
+  const seen = new Set();
+  for (const p of positions) {
+    seen.add(p.plowId);
+    let m = plowMarkers.get(p.plowId);
+    if (!m) {
+      m = L.marker([p.lat, p.lon], {
+        icon: L.divIcon({ className: '', html: '<div class="plow-marker"></div>', iconSize: [10,10], iconAnchor: [5,5] }),
+        keyboard: false, interactive: false
+      });
+      m.addTo(plowMarkerLayer);
+      plowMarkers.set(p.plowId, m);
+    } else {
+      m.setLatLng([p.lat, p.lon]);
+    }
+  }
+  for (const [pid, m] of plowMarkers) {
+    if (!seen.has(pid)) { plowMarkerLayer.removeLayer(m); plowMarkers.delete(pid); }
+  }
+}
+
+function clearPlowback() {
+  plowedLayer.clearLayers();
+  plowedPolylines = new Map();
+  plowMarkerLayer.clearLayers();
+  plowMarkers = new Map();
+  plowedSet = new Set();
+}
+
+/* ------------ playback ------------ */
+let playback = {
+  scenario: null,
+  curMin: 0,
+  endMin: 0,
+  speed: 80,
+  playing: false,
+  rafId: null,
+  lastTs: 0
+};
+
+function loadScenarioForPlayback(scn) {
+  playback.scenario = scn;
+  playback.curMin = 0;
+  playback.endMin = scn.metrics.totalCompletionTimeMinutes;
+  clearPlowback();
+  // initial plow positions = depots
+  const positions = scn.plows.map(p => {
+    const n = GRAPH.nodes[p.depot];
+    return { plowId: p.id, lat: n.lat, lon: n.lon };
+  });
+  setPlowMarkers(positions);
+  document.getElementById('playbar').style.display = 'flex';
+  document.getElementById('pbName').textContent = scn.name;
+  updateClock();
+}
+function updateClock() {
+  document.getElementById('pbClock').textContent =
+    `${fmtClock(playback.curMin)} / ${fmtClock(playback.endMin)}`;
+}
+function tickPlayback(ts) {
+  if (!playback.playing) return;
+  const dt = (ts - playback.lastTs) / 1000;
+  playback.lastTs = ts;
+  playback.curMin = Math.min(playback.endMin, playback.curMin + dt * playback.speed);
+  syncPlayback();
+  if (playback.curMin >= playback.endMin) playback.playing = false;
+  else playback.rafId = requestAnimationFrame(tickPlayback);
+}
+function syncPlayback() {
+  const scn = playback.scenario;
+  if (!scn) return;
+  const newPlowed = new Set();
+  const lastByPlow = new Map();
+  // We can do this in O(n) by walking timeline (already sorted by startMin)
+  for (const ev of scn.timeline) {
+    if (ev.startMin > playback.curMin) break;
+    if (ev.endMin <= playback.curMin) {
+      newPlowed.add(ev.edge);
+      lastByPlow.set(ev.plowId, { ev, finished: true });
+    } else {
+      lastByPlow.set(ev.plowId, { ev, finished: false });
+    }
+  }
+  if (newPlowed.size !== plowedSet.size) {
+    plowedSet = newPlowed;
+    setPlowedVisual(plowedSet);
+  } else {
+    plowedSet = newPlowed;
+  }
+  // Plow positions
+  const positions = scn.plows.map(p => {
+    const info = lastByPlow.get(p.id);
+    if (!info) {
+      const n = GRAPH.nodes[p.depot];
+      return { plowId: p.id, lat: n.lat, lon: n.lon };
+    }
+    const { ev, finished } = info;
+    const e = GRAPH.edges[ev.edge];
+    const startN = GRAPH.nodes[ev.viaA ? e.a : e.b];
+    const endN = GRAPH.nodes[ev.viaA ? e.b : e.a];
+    if (finished) return { plowId: p.id, lat: endN.lat, lon: endN.lon };
+    const total = ev.endMin - ev.startMin;
+    const frac = total > 0 ? (playback.curMin - ev.startMin) / total : 1;
+    return {
+      plowId: p.id,
+      lat: startN.lat + (endN.lat - startN.lat) * frac,
+      lon: startN.lon + (endN.lon - startN.lon) * frac
+    };
+  });
+  setPlowMarkers(positions);
+  updateClock();
+}
+function play() {
+  if (!playback.scenario) return;
+  if (playback.curMin >= playback.endMin) {
+    playback.curMin = 0;
+    clearPlowback();
+  }
+  playback.playing = true;
+  playback.lastTs = performance.now();
+  cancelAnimationFrame(playback.rafId);
+  playback.rafId = requestAnimationFrame(tickPlayback);
+}
+function pause() { playback.playing = false; cancelAnimationFrame(playback.rafId); }
+function restart() { playback.curMin = 0; pause(); clearPlowback(); syncPlayback(); }
+
+document.getElementById('pbPlay').addEventListener('click', play);
+document.getElementById('pbPause').addEventListener('click', pause);
+document.getElementById('pbRestart').addEventListener('click', restart);
+document.getElementById('pbSpeed').addEventListener('input', (e) => { playback.speed = +e.target.value; });
+
+/* ------------ scenarios ------------ */
+let scenarios = [];
+let scenarioCounter = 0;
+let totalTested = 0;
+
+function autoName(inputs) {
+  const cl = inputs.clusteringStrategy[0].toUpperCase() + inputs.clusteringStrategy.slice(1);
+  const pri = inputs.priorityStrategy === 'hi-first' ? 'Hi-Pri'
+            : inputs.priorityStrategy === 'residential-first' ? 'Resi-First' : 'Balanced';
+  return `${pri} / ${inputs.activePlows} plows / ${cl}`;
+}
+function saveScenario(scn, inputs, name) {
+  scenarioCounter++;
+  const obj = {
+    scenarioId: `scenario-${String(scenarioCounter).padStart(3,'0')}`,
+    name: name || autoName(inputs),
+    inputs: {
+      dpwOwnedEquipment: inputs.dpwOwnedEquipment,
+      contractedEquipment: inputs.contractedEquipment,
+      activePlows: inputs.activePlows,
+      routeCount: 28,
+      priorityStrategy: inputs.priorityStrategy,
+      clusteringStrategy: inputs.clusteringStrategy,
+      routingStrategy: inputs.routingStrategy === 'nn2opt' ? 'nearest-neighbor-2opt' : 'nearest-neighbor',
+      assignmentStrategy: inputs.assignmentStrategy,
+      plowSpeedMph: inputs.plowSpeedMph,
+      stormSeverity: inputs.stormSeverity
+    },
+    metrics: scn.metrics,
+    timeline: scn.timeline,
+    routes: scn.plows.map(p => ({ plowId: p.id, depot: p.depot, edgeSequence: p.routeSequence || [] })),
+    pinned: false,
+    plows: scn.plows
+  };
+  scenarios.push(obj);
+  scenarios.sort((a, b) => a.metrics.score - b.metrics.score);
+  const keep = +document.getElementById('inKeep').value || 12;
+  const pinned = scenarios.filter(s => s.pinned);
+  const top = scenarios.filter(s => !s.pinned).slice(0, keep);
+  const seen = new Set();
+  scenarios = [...pinned, ...top].filter(s => {
+    if (seen.has(s.scenarioId)) return false;
+    seen.add(s.scenarioId); return true;
+  }).sort((a, b) => a.metrics.score - b.metrics.score);
+  return obj;
+}
+function renderScenarioList() {
+  const root = document.getElementById('scenarioList');
+  if (!scenarios.length) {
+    root.innerHTML = `<div class="empty">No scenarios yet. Click <strong>Run Optimization</strong>.</div>`;
+    return;
+  }
+  root.innerHTML = '';
+  scenarios.forEach((s, idx) => {
+    const rank = idx + 1;
+    const div = document.createElement('div');
+    div.className = `scenario rank-${rank}`;
+    if (activeScenario && activeScenario.scenarioId === s.scenarioId) div.classList.add('active');
+    div.innerHTML = `
+      <div class="top">
+        <span class="rank">#${rank}</span>
+        <span class="name">${s.name}${s.pinned ? ' <span class="star">★</span>' : ''}</span>
+      </div>
+      <div class="meta">
+        <span>Score <b>${s.metrics.score.toFixed(1)}</b></span>
+        <span>⏱ ${fmtTime(s.metrics.totalCompletionTimeMinutes)}</span>
+        <span>Hi-Pri ${fmtTime(s.metrics.highPriorityCompletionTimeMinutes)}</span>
+      </div>
+      <div class="meta">
+        <span>DH ${s.metrics.deadheadMiles.toFixed(1)}mi</span>
+        <span>Plows ${s.inputs.activePlows}</span>
+        <span>${s.inputs.routingStrategy}</span>
+      </div>
+      <div class="actions">
+        <button data-act="play">▶ Play</button>
+        <button data-act="pin">${s.pinned ? '★ Pinned' : '☆ Pin'}</button>
+        <button data-act="export">Export</button>
+      </div>
+    `;
+    div.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (t.tagName === 'BUTTON') {
+        const act = t.dataset.act;
+        if (act === 'play') { selectScenario(s); play(); }
+        else if (act === 'pin') { s.pinned = !s.pinned; renderScenarioList(); }
+        else if (act === 'export') { exportScenario(s); }
+        ev.stopPropagation();
+      } else {
+        selectScenario(s);
+      }
+    });
+    root.appendChild(div);
+  });
+}
+function selectScenario(s) {
+  activeScenario = s;
+  loadScenarioForPlayback(s);
+  renderScenarioList();
+  updateBestCard();
+}
+function exportScenario(s) {
+  const blob = new Blob([JSON.stringify(s, (k, v) => k === 'plows' ? undefined : v, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${s.scenarioId}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function updateBestCard() {
+  const best = scenarios[0];
+  document.getElementById('hdrTested').textContent = `Scenarios tested: ${totalTested}`;
+  if (!best) {
+    document.getElementById('hdrBest').textContent = 'Best score: —';
+    document.getElementById('bScore').textContent = '—';
+    document.getElementById('bComplete').textContent = '—';
+    document.getElementById('bHi').textContent = '—';
+    document.getElementById('bDH').textContent = '—';
+    return;
+  }
+  document.getElementById('hdrBest').textContent = `Best score: ${best.metrics.score.toFixed(1)}`;
+  document.getElementById('bScore').textContent = best.metrics.score.toFixed(1);
+  document.getElementById('bComplete').textContent = fmtTime(best.metrics.totalCompletionTimeMinutes);
+  document.getElementById('bHi').textContent = fmtTime(best.metrics.highPriorityCompletionTimeMinutes);
+  document.getElementById('bDH').textContent = best.metrics.deadheadMiles.toFixed(1) + 'mi';
+}
+
+/* ------------ inputs ------------ */
+function readInputs() {
+  return {
+    dpwOwnedEquipment: +document.getElementById('inDpw').value,
+    contractedEquipment: +document.getElementById('inContract').value,
+    activePlows: clamp(+document.getElementById('inActive').value, 1, 500),
+    plowSpeedMph: +document.getElementById('inSpeed').value,
+    clusteringStrategy: document.getElementById('inCluster').value,
+    assignmentStrategy: document.getElementById('inAssign').value,
+    routingStrategy: document.getElementById('inRoute').value,
+    priorityStrategy: document.getElementById('inPri').value,
+    stormSeverity: document.getElementById('inStorm').value,
+    plowsPerZone: null,
+    bounds: BOUNDS
+  };
+}
+
+/* ------------ optimizer loop ------------ */
+let optimizing = false;
+async function runOptimization() {
+  if (!GRAPH) { showToast('Map still loading'); return; }
+  if (optimizing) return;
+  optimizing = true;
+  document.getElementById('btnOptimize').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  const total = clamp(+document.getElementById('inBatch').value, 1, 500);
+  const base = readInputs();
+  let i = 0;
+  const status = document.getElementById('optStatus');
+  const bar = document.getElementById('progBar');
+  while (i < total && optimizing) {
+    const inputs = makeRandomScenarioInputs(base);
+    const scn = runScenario(GRAPH, DEPOTS, inputs);
+    saveScenario(scn, inputs);
+    totalTested++;
+    i++;
+    if (i % 2 === 0 || i === total) {
+      bar.style.width = (i / total * 100) + '%';
+      status.textContent = `Testing scenarios… ${i}/${total} (best: ${scenarios[0]?.metrics.score.toFixed(1) ?? '—'})`;
+      renderScenarioList(); updateBestCard();
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  optimizing = false;
+  document.getElementById('btnOptimize').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('optStatus').textContent = `Done. Tested ${i} scenarios. Best simulated score: ${scenarios[0]?.metrics.score.toFixed(1) ?? '—'}`;
+  bar.style.width = '0%';
+  if (!activeScenario && scenarios[0]) selectScenario(scenarios[0]);
+  renderScenarioList(); updateBestCard();
+}
+function stopOptimization() { optimizing = false; }
+function runSingle() {
+  if (!GRAPH) { showToast('Map still loading'); return; }
+  const inputs = readInputs();
+  const scn = runScenario(GRAPH, DEPOTS, inputs);
+  totalTested++;
+  const saved = saveScenario(scn, inputs, autoName(inputs) + ' (manual)');
+  selectScenario(saved);
+  renderScenarioList(); updateBestCard();
+  showToast('Single scenario complete');
+}
+
+function compareTop3() {
+  const top = scenarios.slice(0, 3);
+  if (top.length < 2) { showToast('Need 2+ scenarios'); return; }
+  const bar = document.getElementById('compareBar');
+  const body = document.getElementById('compareBody');
+  body.innerHTML = `
+    <div class="cmp-row head"><div>Scenario</div><div>Score</div><div>Time</div><div>DH</div></div>
+    ${top.map((s, i) => `
+      <div class="cmp-row">
+        <div>#${i+1} ${s.name}</div>
+        <div>${s.metrics.score.toFixed(1)}</div>
+        <div>${fmtTime(s.metrics.totalCompletionTimeMinutes)}</div>
+        <div>${s.metrics.deadheadMiles.toFixed(1)}mi</div>
+      </div>`).join('')}
+  `;
+  bar.style.display = 'block';
+  setTimeout(() => bar.style.display = 'none', 12000);
+}
+
+document.getElementById('btnOptimize').addEventListener('click', runOptimization);
+document.getElementById('btnStop').addEventListener('click', stopOptimization);
+document.getElementById('btnSingle').addEventListener('click', runSingle);
+document.getElementById('btnCompare').addEventListener('click', compareTop3);
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (!confirm('Clear all scenarios?')) return;
+  scenarios = []; activeScenario = null; totalTested = 0;
+  document.getElementById('playbar').style.display = 'none';
+  clearPlowback();
+  renderScenarioList(); updateBestCard();
+});
+
+/* ------------ boot ------------ */
+(async function init() {
+  try {
+    GRAPH = await fetchRoads();
+    BOUNDS = computeBounds(GRAPH);
+    DEPOTS = pickDepots(GRAPH);
+    drawBaseGraph();
+    map.fitBounds([[BOUNDS.minLat, BOUNDS.minLon], [BOUNDS.maxLat, BOUNDS.maxLon]]);
+    document.getElementById('hdrCity').textContent =
+      `Lynn, MA · ${GRAPH.edges.length} segments, ${GRAPH.nodes.length} nodes`;
+    document.getElementById('loader').style.display = 'none';
+    renderScenarioList();
+    showToast('Roads loaded. Click Run Optimization.');
+  } catch (err) {
+    document.getElementById('loaderText').textContent =
+      'Failed to load roads from Overpass. Check connection and refresh. ' + err.message;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

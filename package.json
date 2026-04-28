@@ -1,0 +1,15 @@
+{
+  "name": "lynn-plowing",
+  "version": "1.0.0",
+  "description": "Snow-plow scenario optimizer for Lynn, MA — browser app with Leaflet + OSM road data.",
+  "private": true,
+  "scripts": {
+    "start": "serve -s . -l ${PORT:-8000}"
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
